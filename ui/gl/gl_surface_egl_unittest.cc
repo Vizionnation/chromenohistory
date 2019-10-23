@@ -4,6 +4,8 @@
 
 #include "ui/gl/gl_surface_egl.h"
 
+#include <thread>
+
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -102,6 +104,33 @@ TEST_F(GLSurfaceEGLTest, FixedSizeExtension) {
   gfx::Size resize_size(200, 300);
   surface->Resize(resize_size, 1.0, GLSurface::ColorSpace::UNSPECIFIED, false);
   EXPECT_EQ(resize_size, surface->GetSize());
+}
+
+TEST_F(GLSurfaceEGLTest, MultipleAngleInstances) {
+  TestPlatformDelegate platform_delegate;
+  gfx::Size window_size(400, 500);
+  ui::WinWindow window(&platform_delegate, gfx::Rect(window_size));
+
+  scoped_refptr<GLSurface> surface = InitializeGLSurface(
+      base::MakeRefCounted<NativeViewGLSurfaceEGL>(window.hwnd(), nullptr));
+  ASSERT_TRUE(surface);
+  EXPECT_EQ(window_size, surface->GetSize());
+
+  EGLDisplay display = GLSurfaceEGL::GetHardwareDisplay();
+  EXPECT_EQ(display, surface->GetDisplay());
+
+  std::thread second_thread([&]() {
+    ui::WinWindow window2(&platform_delegate, gfx::Rect(window_size));
+    GLSurfaceEGL::InitializeDisplay(::GetDC(window2.hwnd()));
+
+    auto surface2 = InitializeGLSurface(
+        base::MakeRefCounted<NativeViewGLSurfaceEGL>(window2.hwnd(), nullptr));
+
+    EGLDisplay display2 = GLSurfaceEGL::GetHardwareDisplay();
+    EXPECT_NE(display, display2);
+    EXPECT_EQ(display2, surface2->GetDisplay());
+  });
+  second_thread.join();
 }
 
 #endif
