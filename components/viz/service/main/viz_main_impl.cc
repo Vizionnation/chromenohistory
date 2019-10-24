@@ -246,6 +246,10 @@ void VizMainImpl::CreateFrameSinkManagerInternal(
     DCHECK_EQ(gl::GetGLImplementation(), gl::kGLImplementationDisabled);
   }
 
+  const char kEnableDrDC[] = "enable-dr-dc";
+  const bool enable_dr_dc =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableDrDC);
+
   // When the host loses its connection to the viz process, it assumes the
   // process has crashed and tries to reinitialize it. However, it is possible
   // to have lost the connection for other reasons (e.g. deserialization
@@ -255,7 +259,7 @@ void VizMainImpl::CreateFrameSinkManagerInternal(
   // the same signature. https://crbug.com/928845
   CHECK(!task_executor_);
   task_executor_ = std::make_unique<gpu::GpuInProcessThreadService>(
-      gpu_thread_task_runner_, gpu_service_->scheduler(),
+      viz_compositor_thread_runner_, gpu_service_->scheduler(),
       gpu_service_->sync_point_manager(), gpu_service_->mailbox_manager(),
       gpu_service_->share_group(), format, gpu_service_->gpu_feature_info(),
       gpu_service_->gpu_channel_manager()->gpu_preferences(),

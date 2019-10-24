@@ -49,6 +49,13 @@ SchedulerSequence::SchedulerSequence(Scheduler* scheduler)
       scheduler_(scheduler),
       sequence_id_(scheduler->CreateSequence(SchedulingPriority::kHigh)) {}
 
+SchedulerSequence::SchedulerSequence(
+    Scheduler* scheduler,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : SingleTaskSequence(),
+      scheduler_(scheduler),
+      sequence_id_(scheduler->CreateSequence(SchedulingPriority::kHigh)) {}
+
 // Note: this drops tasks not executed yet.
 SchedulerSequence::~SchedulerSequence() {
   scheduler_->DestroySequence(sequence_id_);

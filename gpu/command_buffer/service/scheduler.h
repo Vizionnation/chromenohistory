@@ -33,7 +33,7 @@ class ConvertableToTraceFormat;
 namespace gpu {
 class SyncPointManager;
 
-class GPU_EXPORT Scheduler {
+class GPU_EXPORT Scheduler : public base::RefCountedThreadSafe<Scheduler> {
  public:
   struct GPU_EXPORT Task {
     Task(SequenceId sequence_id,
@@ -51,13 +51,13 @@ class GPU_EXPORT Scheduler {
   Scheduler(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
             SyncPointManager* sync_point_manager);
 
-  virtual ~Scheduler();
-
   // Create a sequence with given priority. Returns an identifier for the
   // sequence that can be used with SyncPonintManager for creating sync point
   // release clients. Sequences start off as enabled (see |EnableSequence|).
   // Sequence could be created outside of GPU thread.
-  SequenceId CreateSequence(SchedulingPriority priority);
+  SequenceId CreateSequence(
+      SchedulingPriority priority,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner = nullptr);
 
   // Destroy the sequence and run any scheduled tasks immediately. Sequence
   // could be destroyed outside of GPU thread.
@@ -92,10 +92,11 @@ class GPU_EXPORT Scheduler {
   // If the sequence should yield so that a higher priority sequence may run.
   bool ShouldYield(SequenceId sequence_id);
 
-  base::WeakPtr<Scheduler> AsWeakPtr();
+ protected:
+  friend class base::RefCountedThreadSafe<Scheduler>;
+  virtual ~Scheduler();
 
  private:
-
   struct SchedulingState {
     static bool Comparator(const SchedulingState& lhs,
                            const SchedulingState& rhs) {
@@ -124,7 +125,8 @@ class GPU_EXPORT Scheduler {
     Sequence(Scheduler* scheduler,
              SequenceId sequence_id,
              SchedulingPriority priority,
-             scoped_refptr<SyncPointOrderData> order_data);
+             scoped_refptr<SyncPointOrderData> order_data,
+             scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
     ~Sequence();
 
@@ -132,6 +134,10 @@ class GPU_EXPORT Scheduler {
 
     const scoped_refptr<SyncPointOrderData>& order_data() const {
       return order_data_;
+    }
+
+    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner() const {
+      return task_runner_;
     }
 
     bool enabled() const { return enabled_; }
@@ -281,6 +287,8 @@ class GPU_EXPORT Scheduler {
 
     scoped_refptr<SyncPointOrderData> order_data_;
 
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
     // Deque of tasks. Tasks are inserted at the back with increasing order
     // number generated from SyncPointOrderData. If a running task needs to be
     // continued, it is inserted at the front with the same order number.
@@ -310,7 +318,8 @@ class GPU_EXPORT Scheduler {
 
   void TryScheduleSequence(Sequence* sequence);
 
-  void RebuildSchedulingQueue();
+  std::vector<SchedulingState>& GetSchedulingQueue(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   Sequence* GetSequence(SequenceId sequence_id);
 
@@ -323,23 +332,23 @@ class GPU_EXPORT Scheduler {
   mutable base::Lock lock_;
 
   // The following are protected by |lock_|.
-  bool running_ = false;
+  base::flat_map<SequenceId, std::unique_ptr<Sequence>> sequence_map_;
 
-  base::flat_map<SequenceId, std::unique_ptr<Sequence>> sequences_;
+  struct PerThreadState {
+    PerThreadState();
+    PerThreadState(PerThreadState&&);
+    ~PerThreadState();
+    PerThreadState& operator=(PerThreadState&&);
 
-  // Used as a priority queue for scheduling sequences. Min heap of
-  // SchedulingState with highest priority (lowest order) in front.
-  std::vector<SchedulingState> scheduling_queue_;
-
-  // If the scheduling queue needs to be rebuild because a sequence changed
-  // priority.
-  bool rebuild_scheduling_queue_ = false;
+    // Used as a priority queue for scheduling sequences. Min heap of
+    // SchedulingState with highest priority (lowest order) in front.
+    std::vector<SchedulingState> scheduling_queue;
+    bool rebuild_scheduling_queue = false;
+  };
+  base::flat_map<scoped_refptr<base::SingleThreadTaskRunner>, PerThreadState>
+      per_thread_state_map_;
 
   base::ThreadChecker thread_checker_;
-
-  // Invalidated on main thread.
-  base::WeakPtr<Scheduler> weak_ptr_;
-  base::WeakPtrFactory<Scheduler> weak_factory_{this};
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SchedulerTest, StreamPriorities);

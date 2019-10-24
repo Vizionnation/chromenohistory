@@ -53,6 +53,8 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SchedulerSequence
   static void DefaultDisallowScheduleTaskOnCurrentThread();
 
   explicit SchedulerSequence(Scheduler* scheduler);
+  SchedulerSequence(Scheduler* scheduler,
+                    scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // Note: this drops tasks not executed yet.
   ~SchedulerSequence() override;
