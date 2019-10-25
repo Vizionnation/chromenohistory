@@ -1,0 +1,98 @@
+# Copyright 2019 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+import("//weblayer/variables.gni")
+
+android_resources("weblayer_resources") {
+  resource_dirs = []
+  custom_package = "org.chromium.weblayer_private"
+}
+
+generate_locale_config_srcjar("weblayer_locale_config") {
+  java_package = weblayer_locale_config_java_package
+}
+
+android_library("java") {
+  java_files = [
+    "org/chromium/weblayer_private/BrowserControllerImpl.java",
+    "org/chromium/weblayer_private/BrowserFragmentControllerImpl.java",
+    "org/chromium/weblayer_private/BrowserFragmentImpl.java",
+    "org/chromium/weblayer_private/BrowserObserverProxy.java",
+    "org/chromium/weblayer_private/ContentView.java",
+    "org/chromium/weblayer_private/ContentViewRenderView.java",
+    "org/chromium/weblayer_private/DownloadDelegateProxy.java",
+    "org/chromium/weblayer_private/FullscreenDelegateProxy.java",
+    "org/chromium/weblayer_private/NavigationControllerImpl.java",
+    "org/chromium/weblayer_private/NavigationImpl.java",
+    "org/chromium/weblayer_private/ProfileImpl.java",
+    "org/chromium/weblayer_private/ProfileManager.java",
+    "org/chromium/weblayer_private/TopControlsContainerView.java",
+    "org/chromium/weblayer_private/WebLayerImpl.java",
+    "org/chromium/weblayer_private/ChildProcessServiceImpl.java",
+    "org/chromium/weblayer_private/RemoteFragmentImpl.java",
+  ]
+
+  deps = [
+    ":client_java",
+    ":weblayer_resources",
+    "//base:base_java",
+    "//base:jni_java",
+    "//components/embedder_support/android:application_java",
+    "//content/public/android:content_java",
+    "//third_party/android_deps:com_android_support_support_compat_java",
+    "//ui/android:ui_java",
+  ]
+  srcjar_deps = [ ":weblayer_locale_config" ]
+  jar_excluded_patterns = [ "*/LocaleConfig.class" ]
+  annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
+}
+
+generate_jni("jni") {
+  sources = [
+    "org/chromium/weblayer_private/BrowserControllerImpl.java",
+    "org/chromium/weblayer_private/BrowserObserverProxy.java",
+    "org/chromium/weblayer_private/ContentViewRenderView.java",
+    "org/chromium/weblayer_private/DownloadDelegateProxy.java",
+    "org/chromium/weblayer_private/FullscreenDelegateProxy.java",
+    "org/chromium/weblayer_private/NavigationControllerImpl.java",
+    "org/chromium/weblayer_private/NavigationImpl.java",
+    "org/chromium/weblayer_private/ProfileImpl.java",
+    "org/chromium/weblayer_private/TopControlsContainerView.java",
+  ]
+}
+
+android_library("client_java") {
+  java_files = [
+    "org/chromium/weblayer_private/aidl/ObjectWrapper.java",
+    "org/chromium/weblayer_private/aidl/WebLayerVersion.java",
+    "org/chromium/weblayer_private/aidl/APICallException.java",
+    "org/chromium/weblayer_private/aidl/BrowserFragmentArgs.java",
+  ]
+
+  srcjar_deps = [ ":aidl" ]
+}
+
+android_aidl("aidl") {
+  import_include = [ "org/chromium/weblayer_private/aidl" ]
+  sources = [
+    "org/chromium/weblayer_private/aidl/IBrowserController.aidl",
+    "org/chromium/weblayer_private/aidl/IBrowserControllerClient.aidl",
+    "org/chromium/weblayer_private/aidl/IBrowserFragment.aidl",
+    "org/chromium/weblayer_private/aidl/IBrowserFragmentController.aidl",
+    "org/chromium/weblayer_private/aidl/IChildProcessService.aidl",
+    "org/chromium/weblayer_private/aidl/IClientNavigation.aidl",
+    "org/chromium/weblayer_private/aidl/IDownloadDelegateClient.aidl",
+    "org/chromium/weblayer_private/aidl/IFullscreenDelegateClient.aidl",
+    "org/chromium/weblayer_private/aidl/INavigation.aidl",
+    "org/chromium/weblayer_private/aidl/INavigationController.aidl",
+    "org/chromium/weblayer_private/aidl/INavigationControllerClient.aidl",
+    "org/chromium/weblayer_private/aidl/IObjectWrapper.aidl",
+    "org/chromium/weblayer_private/aidl/IProfile.aidl",
+    "org/chromium/weblayer_private/aidl/IRemoteFragment.aidl",
+    "org/chromium/weblayer_private/aidl/IRemoteFragmentClient.aidl",
+    "org/chromium/weblayer_private/aidl/IWebLayer.aidl",
+  ]
+}
