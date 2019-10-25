@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/observer_list.h"
+#include "base/observer_list_threadsafe.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/waitable_event.h"
@@ -336,7 +336,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
 
   std::unique_ptr<gpu::SharedImageManager> owned_shared_image_manager_;
 
-  std::unique_ptr<gpu::Scheduler> scheduler_;
+  scoped_refptr<gpu::Scheduler> scheduler_;
 
 #if BUILDFLAG(ENABLE_VULKAN)
   gpu::VulkanImplementation* vulkan_implementation_;
@@ -380,7 +380,8 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
   bool oopd_enabled_ = false;
 
   // Display compositor contexts that don't have a corresponding GPU channel.
-  base::ObserverList<gpu::DisplayContext>::Unchecked display_contexts_;
+  scoped_refptr<base::ObserverListThreadSafe<gpu::DisplayContext>>
+      display_contexts_;
 
   base::WeakPtr<GpuServiceImpl> weak_ptr_;
   base::WeakPtrFactory<GpuServiceImpl> weak_ptr_factory_{this};

@@ -16,7 +16,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_checker.h"
 #include "gpu/command_buffer/common/command_buffer_id.h"
 #include "gpu/command_buffer/common/scheduling_priority.h"
 #include "gpu/command_buffer/common/sync_token.h"
@@ -52,7 +51,7 @@ class GPU_EXPORT Scheduler : public base::RefCountedThreadSafe<Scheduler> {
             SyncPointManager* sync_point_manager);
 
   // Create a sequence with given priority. Returns an identifier for the
-  // sequence that can be used with SyncPonintManager for creating sync point
+  // sequence that can be used with SyncPointManager for creating sync point
   // release clients. Sequences start off as enabled (see |EnableSequence|).
   // Sequence could be created outside of GPU thread.
   SequenceId CreateSequence(
@@ -318,7 +317,7 @@ class GPU_EXPORT Scheduler : public base::RefCountedThreadSafe<Scheduler> {
 
   void TryScheduleSequence(Sequence* sequence);
 
-  std::vector<SchedulingState>& GetSchedulingQueue(
+  std::vector<SchedulingState>& RebuildSchedulingQueueIfNeeded(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   Sequence* GetSequence(SequenceId sequence_id);
@@ -347,8 +346,6 @@ class GPU_EXPORT Scheduler : public base::RefCountedThreadSafe<Scheduler> {
   };
   base::flat_map<scoped_refptr<base::SingleThreadTaskRunner>, PerThreadState>
       per_thread_state_map_;
-
-  base::ThreadChecker thread_checker_;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SchedulerTest, StreamPriorities);

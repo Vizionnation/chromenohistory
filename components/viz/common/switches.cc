@@ -26,6 +26,9 @@ const char kDisableFrameRateLimit[] = "disable-frame-rate-limit";
 // Experimental de-jelly support.
 const char kEnableDeJelly[] = "enable-de-jelly";
 
+// Experimental Direct Rendering Display Compositor.
+const char kEnableDrDc[] = "enable-dr-dc";
+
 // Enable compositing individual elements via hardware overlays when
 // permitted by device.
 // Setting the flag to "single-fullscreen" will try to promote a single

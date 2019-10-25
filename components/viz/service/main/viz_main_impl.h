@@ -29,6 +29,7 @@
 
 namespace gpu {
 class GpuInit;
+class MailboxManager;
 class SyncPointManager;
 class SharedImageManager;
 }  // namespace gpu
@@ -75,6 +76,7 @@ class VizMainImpl : public mojom::VizMain {
     scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner;
     std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder;
     VizCompositorThreadRunner* viz_compositor_thread_runner = nullptr;
+    bool enable_dr_dc = false;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(ExternalDependencies);
@@ -125,6 +127,8 @@ class VizMainImpl : public mojom::VizMain {
  private:
   void CreateFrameSinkManagerInternal(mojom::FrameSinkManagerParamsPtr params);
 
+  void InitializeDrDcDependenciesOnThread(base::WaitableEvent* event);
+
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner() const {
     return io_thread_ ? io_thread_->task_runner()
                       : dependencies_.io_thread_task_runner;
@@ -163,6 +167,17 @@ class VizMainImpl : public mojom::VizMain {
   VizCompositorThreadRunner* viz_compositor_thread_runner_ = nullptr;
 
   const scoped_refptr<base::SingleThreadTaskRunner> gpu_thread_task_runner_;
+
+  struct DrDcDependencies {
+    DrDcDependencies();
+    ~DrDcDependencies();
+    bool enabled = false;
+    std::unique_ptr<base::Thread> thread;
+    std::unique_ptr<gpu::MailboxManager> mailbox_manager;
+    scoped_refptr<gpu::SharedContextState> shared_context_state;
+    std::unique_ptr<gpu::gles2::ProgramCache> program_cache;
+  };
+  DrDcDependencies dr_dc_deps_;
 
   std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder_;
   mojo::AssociatedReceiver<mojom::VizMain> receiver_{this};

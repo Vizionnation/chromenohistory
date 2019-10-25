@@ -157,7 +157,9 @@ GpuServiceImpl::GpuServiceImpl(
 #if BUILDFLAG(ENABLE_VULKAN)
       vulkan_implementation_(vulkan_implementation),
 #endif
-      exit_callback_(std::move(exit_callback)) {
+      exit_callback_(std::move(exit_callback)),
+      display_contexts_(
+          new base::ObserverListThreadSafe<gpu::DisplayContext>()) {
   DCHECK(!io_runner_->BelongsToCurrentThread());
   DCHECK(exit_callback_);
 
@@ -306,7 +308,7 @@ void GpuServiceImpl::InitializeWithHost(
     // The shared image will be only used on GPU main thread, so it doesn't need
     // to be thread safe.
     owned_shared_image_manager_ =
-        std::make_unique<gpu::SharedImageManager>(false /* thread_safe */);
+        std::make_unique<gpu::SharedImageManager>(true /* thread_safe */);
     shared_image_manager = owned_shared_image_manager_.get();
   }
 
@@ -319,7 +321,7 @@ void GpuServiceImpl::InitializeWithHost(
   }
 
   scheduler_ =
-      std::make_unique<gpu::Scheduler>(main_runner_, sync_point_manager);
+      base::MakeRefCounted<gpu::Scheduler>(main_runner_, sync_point_manager);
 
   // Defer creation of the render thread. This is to prevent it from handling
   // IPC messages before the sandbox has been enabled and all other necessary
@@ -652,34 +654,26 @@ void GpuServiceImpl::UpdateGpuInfoPlatform(
 
 void GpuServiceImpl::RegisterDisplayContext(
     gpu::DisplayContext* display_context) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-  display_contexts_.AddObserver(display_context);
+  display_contexts_->AddObserver(display_context);
 }
 
 void GpuServiceImpl::UnregisterDisplayContext(
     gpu::DisplayContext* display_context) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-  display_contexts_.RemoveObserver(display_context);
+  display_contexts_->RemoveObserver(display_context);
 }
 
 void GpuServiceImpl::LoseAllContexts() {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-
   if (IsExiting())
     return;
-
-  for (auto& display_context : display_contexts_)
-    display_context.MarkContextLost();
+  display_contexts_->Notify(FROM_HERE, &gpu::DisplayContext::MarkContextLost);
   gpu_channel_manager_->LoseAllContexts();
 }
 
 void GpuServiceImpl::DidCreateContextSuccessfully() {
-  DCHECK(main_runner_->BelongsToCurrentThread());
   gpu_host_->DidCreateContextSuccessfully();
 }
 
 void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
   gpu_host_->DidCreateOffscreenContext(active_url);
 }
 
@@ -697,14 +691,12 @@ void GpuServiceImpl::DidDestroyOffscreenContext(const GURL& active_url) {
 void GpuServiceImpl::DidLoseContext(bool offscreen,
                                     gpu::error::ContextLostReason reason,
                                     const GURL& active_url) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
   gpu_host_->DidLoseContext(offscreen, reason, active_url);
 }
 
 void GpuServiceImpl::StoreShaderToDisk(int client_id,
                                        const std::string& key,
                                        const std::string& shader) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
   gpu_host_->StoreShaderToDisk(client_id, key, shader);
 }
 
@@ -918,8 +910,6 @@ void GpuServiceImpl::GetPeakMemoryUsageOnMainThread(
 }
 
 void GpuServiceImpl::MaybeExit(bool for_context_loss) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-
   // We can't restart the GPU process when running in the host process.
   if (in_host_process())
     return;

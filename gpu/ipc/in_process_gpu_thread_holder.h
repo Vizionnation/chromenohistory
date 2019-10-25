@@ -51,7 +51,7 @@ class COMPONENT_EXPORT(GPU_THREAD_HOLDER) InProcessGpuThreadHolder
   GpuFeatureInfo gpu_feature_info_;
 
   std::unique_ptr<SyncPointManager> sync_point_manager_;
-  std::unique_ptr<Scheduler> scheduler_;
+  scoped_refptr<Scheduler> scheduler_;
   std::unique_ptr<MailboxManager> mailbox_manager_;
   std::unique_ptr<SharedImageManager> shared_image_manager_;
   std::unique_ptr<CommandBufferTaskExecutor> task_executor_;

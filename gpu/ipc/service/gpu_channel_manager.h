@@ -144,6 +144,12 @@ class GPU_IPC_SERVICE_EXPORT GpuChannelManager
     return &peak_memory_monitor_;
   }
 
+  GpuProcessActivityFlags* activity_flags() { return &activity_flags_; }
+
+  base::WeakPtr<GpuChannelManager> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
 #if defined(OS_ANDROID)
   void DidAccessGpu();
   void OnBackgroundCleanup();

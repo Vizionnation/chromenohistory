@@ -303,13 +303,9 @@ void Scheduler::Sequence::RemoveClientWait(CommandBufferId command_buffer_id) {
 Scheduler::Scheduler(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                      SyncPointManager* sync_point_manager)
     : task_runner_(std::move(task_runner)),
-      sync_point_manager_(sync_point_manager) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-}
+      sync_point_manager_(sync_point_manager) {}
 
-Scheduler::~Scheduler() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-}
+Scheduler::~Scheduler() = default;
 
 SequenceId Scheduler::CreateSequence(
     SchedulingPriority priority,
@@ -364,7 +360,6 @@ void Scheduler::DisableSequence(SequenceId sequence_id) {
 
 void Scheduler::RaisePriorityForClientWait(SequenceId sequence_id,
                                            CommandBufferId command_buffer_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
   Sequence* sequence = GetSequence(sequence_id);
   DCHECK(sequence);
@@ -373,7 +368,6 @@ void Scheduler::RaisePriorityForClientWait(SequenceId sequence_id,
 
 void Scheduler::ResetPriorityForClientWait(SequenceId sequence_id,
                                            CommandBufferId command_buffer_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
   Sequence* sequence = GetSequence(sequence_id);
   DCHECK(sequence);
@@ -420,23 +414,23 @@ void Scheduler::ScheduleTaskHelper(Task task) {
 
 void Scheduler::ContinueTask(SequenceId sequence_id,
                              base::OnceClosure closure) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
   Sequence* sequence = GetSequence(sequence_id);
   DCHECK(sequence);
+  DCHECK(sequence->task_runner()->BelongsToCurrentThread());
   sequence->ContinueTask(std::move(closure));
 }
 
 bool Scheduler::ShouldYield(SequenceId sequence_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
 
   Sequence* running_sequence = GetSequence(sequence_id);
   DCHECK(running_sequence);
   DCHECK(running_sequence->running());
+  DCHECK(running_sequence->task_runner()->BelongsToCurrentThread());
 
   const auto& scheduling_queue =
-      GetSchedulingQueue(running_sequence->task_runner().get());
+      per_thread_state_map_[running_sequence->task_runner()].scheduling_queue;
 
   if (scheduling_queue.empty())
     return false;
@@ -477,9 +471,10 @@ void Scheduler::TryScheduleSequence(Sequence* sequence) {
     DCHECK(sequence->IsRunnable());
     per_thread_state_map_[task_runner].rebuild_scheduling_queue = true;
   } else if (!sequence->scheduled() && sequence->IsRunnable()) {
-    auto& scheduling_queue = GetSchedulingQueue(task_runner);
     // Insert into scheduling queue if sequence isn't already scheduled.
     SchedulingState scheduling_state = sequence->SetScheduled();
+    auto& scheduling_queue =
+        per_thread_state_map_[task_runner].scheduling_queue;
     scheduling_queue.push_back(scheduling_state);
     std::push_heap(scheduling_queue.begin(), scheduling_queue.end(),
                    &SchedulingState::Comparator);
@@ -491,9 +486,10 @@ void Scheduler::TryScheduleSequence(Sequence* sequence) {
   }
 }
 
-std::vector<Scheduler::SchedulingState>& Scheduler::GetSchedulingQueue(
+std::vector<Scheduler::SchedulingState>&
+Scheduler::RebuildSchedulingQueueIfNeeded(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(task_runner->BelongsToCurrentThread());
   lock_.AssertAcquired();
 
   auto& per_thread_state = per_thread_state_map_[task_runner];
@@ -520,11 +516,10 @@ std::vector<Scheduler::SchedulingState>& Scheduler::GetSchedulingQueue(
 }
 
 void Scheduler::RunNextTask() {
-  DCHECK(thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
 
   auto task_runner = base::ThreadTaskRunnerHandle::Get();
-  auto& scheduling_queue = GetSchedulingQueue(task_runner);
+  auto& scheduling_queue = RebuildSchedulingQueueIfNeeded(task_runner);
 
   if (scheduling_queue.empty()) {
     TRACE_EVENT_ASYNC_END0("gpu", "Scheduler::Running", this);

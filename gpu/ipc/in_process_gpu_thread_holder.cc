@@ -67,7 +67,7 @@ void InProcessGpuThreadHolder::InitializeOnGpuThread(
     base::WaitableEvent* completion) {
   sync_point_manager_ = std::make_unique<SyncPointManager>();
   scheduler_ =
-      std::make_unique<Scheduler>(task_runner(), sync_point_manager_.get());
+      base::MakeRefCounted<Scheduler>(task_runner(), sync_point_manager_.get());
   mailbox_manager_ = gles2::CreateMailboxManager(gpu_preferences_);
   shared_image_manager_ = std::make_unique<SharedImageManager>();
   task_executor_ = std::make_unique<GpuInProcessThreadService>(

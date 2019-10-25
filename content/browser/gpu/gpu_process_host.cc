@@ -219,6 +219,7 @@ static const char* const kSwitchNames[] = {
     switches::kDisableWebRtcHWEncoding,
     switches::kEnableGpuRasterization,
     switches::kEnableLogging,
+    switches::kEnableDrDc,
     switches::kEnableDeJelly,
     switches::kDeJellyScreenWidth,
     switches::kEnableVizDevTools,

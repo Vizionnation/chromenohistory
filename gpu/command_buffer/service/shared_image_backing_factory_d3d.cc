@@ -743,8 +743,6 @@ SharedImageBackingFactoryD3D::CreateSharedImage(
     const gfx::ColorSpace& color_space,
     uint32_t usage,
     bool is_thread_safe) {
-  DCHECK(!is_thread_safe);
-
   // Without D3D11, we cannot do shared images. This will happen if we're
   // running with Vulkan, D3D9, GL or with the non-passthrough command decoder
   // in tests.

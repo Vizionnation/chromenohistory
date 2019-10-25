@@ -57,7 +57,7 @@ class GpuChannelTestCommon : public testing::Test {
   scoped_refptr<base::TestSimpleTaskRunner> io_task_runner_;
   std::unique_ptr<SyncPointManager> sync_point_manager_;
   std::unique_ptr<SharedImageManager> shared_image_manager_;
-  std::unique_ptr<Scheduler> scheduler_;
+  scoped_refptr<Scheduler> scheduler_;
   std::unique_ptr<TestGpuChannelManagerDelegate> channel_manager_delegate_;
   std::unique_ptr<GpuChannelManager> channel_manager_;
 

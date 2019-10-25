@@ -5,6 +5,7 @@
 #include "gpu/ipc/scheduler_sequence.h"
 
 #include "base/no_destructor.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_local.h"
 #include "gpu/command_buffer/service/scheduler.h"
 
@@ -44,17 +45,13 @@ void SchedulerSequence::DefaultDisallowScheduleTaskOnCurrentThread() {
 #endif
 }
 
-SchedulerSequence::SchedulerSequence(Scheduler* scheduler)
-    : SingleTaskSequence(),
-      scheduler_(scheduler),
-      sequence_id_(scheduler->CreateSequence(SchedulingPriority::kHigh)) {}
-
 SchedulerSequence::SchedulerSequence(
     Scheduler* scheduler,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : SingleTaskSequence(),
       scheduler_(scheduler),
-      sequence_id_(scheduler->CreateSequence(SchedulingPriority::kHigh)) {}
+      sequence_id_(scheduler->CreateSequence(SchedulingPriority::kHigh,
+                                             std::move(task_runner))) {}
 
 // Note: this drops tasks not executed yet.
 SchedulerSequence::~SchedulerSequence() {

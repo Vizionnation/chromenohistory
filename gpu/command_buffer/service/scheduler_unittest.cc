@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/post_task.h"
 #include "base/test/test_simple_task_runner.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -43,7 +44,7 @@ class SchedulerTest : public testing::Test {
  private:
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   std::unique_ptr<SyncPointManager> sync_point_manager_;
-  std::unique_ptr<Scheduler> scheduler_;
+  scoped_refptr<Scheduler> scheduler_;
 };
 
 TEST_F(SchedulerTest, ScheduledTasksRunInOrder) {
@@ -107,8 +108,12 @@ class SchedulerTaskRunOrderTest : public SchedulerTest {
   }
 
  protected:
-  void CreateSequence(int sequence_key, SchedulingPriority priority) {
-    SequenceId sequence_id = scheduler()->CreateSequence(priority);
+  void CreateSequence(
+      int sequence_key,
+      SchedulingPriority priority,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner = nullptr) {
+    SequenceId sequence_id =
+        scheduler()->CreateSequence(priority, std::move(task_runner));
     CommandBufferId command_buffer_id =
         CommandBufferId::FromUnsafeValue(sequence_key);
     scoped_refptr<SyncPointClientState> release_state =
@@ -202,6 +207,23 @@ class SchedulerTaskRunOrderTest : public SchedulerTest {
 };
 
 TEST_F(SchedulerTaskRunOrderTest, SequencesRunInPriorityOrder) {
+  CreateSequence(0, SchedulingPriority::kLow);
+  CreateSequence(1, SchedulingPriority::kNormal);
+  CreateSequence(2, SchedulingPriority::kHigh);
+
+  ScheduleTask(0, -1, -1);  // task 0: seq 0, no wait, no release
+  ScheduleTask(1, -1, -1);  // task 1: seq 1, no wait, no release
+  ScheduleTask(2, -1, -1);  // task 2: seq 2, no wait, no release
+
+  RunAllPendingTasks();
+
+  const int expected_task_order[] = {2, 1, 0};
+  EXPECT_THAT(tasks_executed(), testing::ElementsAreArray(expected_task_order));
+}
+
+TEST_F(SchedulerTest, MultiThread) {
+  auto second_task_runner = base::MakeRefCounted<base::TestSimpleTaskRunner>();
+
   CreateSequence(0, SchedulingPriority::kLow);
   CreateSequence(1, SchedulingPriority::kNormal);
   CreateSequence(2, SchedulingPriority::kHigh);

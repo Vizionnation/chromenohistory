@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/power_monitor/power_monitor.h"
@@ -16,8 +17,13 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
 #include "components/ui_devtools/buildflags.h"
+#include "components/viz/common/switches.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "gpu/command_buffer/common/activity_flags.h"
+#include "gpu/command_buffer/service/mailbox_manager_impl.h"
+#include "gpu/command_buffer/service/memory_program_cache.h"
+#include "gpu/command_buffer/service/passthrough_program_cache.h"
+#include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/ipc/gpu_in_process_thread_service.h"
 #include "gpu/ipc/service/gpu_init.h"
@@ -26,6 +32,11 @@
 #include "services/metrics/public/cpp/delegating_ukm_recorder.h"
 #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
 #include "third_party/skia/include/core/SkFontLCDConfig.h"
+#include "ui/gl/init/gl_factory.h"
+
+#if defined(OS_WIN)
+#include "ui/gl/gl_surface_egl.h"
+#endif  // OS_WIN
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
@@ -59,6 +70,9 @@ VizMainImpl::ExternalDependencies::ExternalDependencies(
 
 VizMainImpl::ExternalDependencies& VizMainImpl::ExternalDependencies::operator=(
     ExternalDependencies&& other) = default;
+
+VizMainImpl::DrDcDependencies::DrDcDependencies() = default;
+VizMainImpl::DrDcDependencies::~DrDcDependencies() = default;
 
 VizMainImpl::VizMainImpl(Delegate* delegate,
                          ExternalDependencies dependencies,
@@ -107,8 +121,17 @@ VizMainImpl::VizMainImpl(Delegate* delegate,
       gpu_init_->gpu_feature_info_for_hardware_gpu(),
       gpu_init_->gpu_extra_info(), gpu_init_->vulkan_implementation(),
       base::BindOnce(&VizMainImpl::ExitProcess, base::Unretained(this)));
-  if (dependencies_.create_display_compositor)
+  if (dependencies_.create_display_compositor) {
     gpu_service_->set_oopd_enabled();
+
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableDrDc)) {
+      dr_dc_deps_.enabled = true;
+      dr_dc_deps_.thread = std::make_unique<base::Thread>("DrDcThread");
+      dr_dc_deps_.thread->StartWithOptions(
+          base::Thread::Options(base::MessagePumpType::UI, 0));
+    }
+  }
 
 #if defined(USE_OZONE)
   ui::OzonePlatform::GetInstance()->AddInterfaces(&registry_);
@@ -210,13 +233,94 @@ void VizMainImpl::CreateGpuService(
       dependencies_.sync_point_manager, dependencies_.shared_image_manager,
       dependencies_.shutdown_event);
 
+  if (dr_dc_deps_.enabled) {
+    base::WaitableEvent event;
+    dr_dc_deps_.thread->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&VizMainImpl::InitializeDrDcDependenciesOnThread,
+                       base::Unretained(this), &event));
+    event.Wait();
+  }
+
   if (!pending_frame_sink_manager_params_.is_null()) {
-    CreateFrameSinkManagerInternal(
-        std::move(pending_frame_sink_manager_params_));
+    mojom::FrameSinkManagerParamsPtr params =
+        std::move(pending_frame_sink_manager_params_);
     pending_frame_sink_manager_params_.reset();
+    CreateFrameSinkManager(std::move(params));
   }
   if (delegate_)
     delegate_->OnGpuServiceConnection(gpu_service_.get());
+}
+
+void VizMainImpl::InitializeDrDcDependenciesOnThread(
+    base::WaitableEvent* event) {
+  DCHECK(dr_dc_deps_.enabled);
+  DCHECK_EQ(dr_dc_deps_.thread->GetThreadId(),
+            base::PlatformThread::CurrentId());
+
+#if defined(OS_WIN)
+  gl::GLSurfaceEGL::InitializeDisplay(::GetDC(nullptr));
+#endif  // OS_WIN
+
+  dr_dc_deps_.mailbox_manager =
+      std::make_unique<gpu::gles2::MailboxManagerImpl>();
+
+  auto share_group = base::MakeRefCounted<gl::GLShareGroup>();
+  auto surface = gl::init::CreateOffscreenGLSurface(gfx::Size());
+
+  const auto& gpu_preferences =
+      gpu_service_->gpu_channel_manager()->gpu_preferences();
+  const bool use_passthrough_decoder =
+      gpu::gles2::PassthroughCommandDecoderSupported() &&
+      gpu_preferences.use_passthrough_cmd_decoder;
+  gl::GLContextAttribs attribs = gpu::gles2::GenerateGLContextAttribs(
+      gpu::ContextCreationAttribs(), use_passthrough_decoder);
+
+  auto context =
+      gl::init::CreateGLContext(share_group.get(), surface.get(), attribs);
+  DCHECK(context);
+  DCHECK_EQ(context->share_group(), share_group.get());
+
+  const auto& gpu_feature_info =
+      gpu_service_->gpu_channel_manager()->gpu_feature_info();
+  gpu_feature_info.ApplyToGLContext(context.get());
+
+  bool is_current = context->MakeCurrent(surface.get());
+  DCHECK(is_current);
+
+  const gpu::GpuDriverBugWorkarounds workarounds(
+      gpu_feature_info.enabled_gpu_driver_bug_workarounds);
+  const bool disable_disk_cache =
+      gpu_preferences.disable_gpu_shader_disk_cache ||
+      workarounds.disable_program_disk_cache;
+  dr_dc_deps_.program_cache = std::make_unique<gpu::gles2::MemoryProgramCache>(
+      gpu_preferences.gpu_program_cache_size, disable_disk_cache,
+      workarounds.disable_program_caching_for_transform_feedback,
+      gpu_service_->gpu_channel_manager()->activity_flags());
+
+  auto context_lost_callback =
+      base::BindOnce(&gpu::GpuChannelManager::OnContextLost,
+                     gpu_service_->gpu_channel_manager()->GetWeakPtr(),
+                     /*synthetic_loss=*/false);
+
+  // Notify GPU main thread about context loss.
+  auto post_context_lost_callback = base::BindOnce(
+      [](scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+         base::OnceClosure callback) {
+        NOTREACHED();
+        task_runner->PostTask(FROM_HERE, std::move(callback));
+      },
+      gpu_thread_task_runner_, std::move(context_lost_callback));
+
+  dr_dc_deps_.shared_context_state =
+      base::MakeRefCounted<gpu::SharedContextState>(
+          std::move(share_group), std::move(surface), std::move(context),
+          /*use_virtualized_gl_contexts=*/false,
+          std::move(post_context_lost_callback),
+          gpu_preferences.gr_context_type,
+          /*vulkan_context_provider_=*/nullptr,
+          /*metal_context_provider_=*/nullptr);
+  event->Signal();
 }
 
 void VizMainImpl::CreateFrameSinkManager(
@@ -228,28 +332,60 @@ void VizMainImpl::CreateFrameSinkManager(
     pending_frame_sink_manager_params_ = std::move(params);
     return;
   }
-  CreateFrameSinkManagerInternal(std::move(params));
+  if (dr_dc_deps_.enabled) {
+    base::WaitableEvent event;
+    dr_dc_deps_.thread->task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](VizMainImpl* viz_main_impl,
+               mojom::FrameSinkManagerParamsPtr params,
+               base::WaitableEvent* event) {
+              viz_main_impl->CreateFrameSinkManagerInternal(std::move(params));
+              event->Signal();
+            },
+            base::Unretained(this), std::move(params), &event));
+    event.Wait();
+  } else {
+    CreateFrameSinkManagerInternal(std::move(params));
+  }
 }
 
 void VizMainImpl::CreateFrameSinkManagerInternal(
     mojom::FrameSinkManagerParamsPtr params) {
   DCHECK(gpu_service_);
-  DCHECK(gpu_thread_task_runner_->BelongsToCurrentThread());
+  auto task_runner = dr_dc_deps_.enabled ? dr_dc_deps_.thread->task_runner()
+                                         : gpu_thread_task_runner_;
+  DCHECK(task_runner->BelongsToCurrentThread());
+
+  gpu::MailboxManager* mailbox_manager = nullptr;
+  scoped_refptr<gl::GLShareGroup> share_group;
+  scoped_refptr<gl::GLSurface> offscreen_surface;
+  gpu::gles2::ProgramCache* program_cache = nullptr;
+  scoped_refptr<gpu::SharedContextState> shared_context_state;
+
+  if (dr_dc_deps_.enabled) {
+    mailbox_manager = dr_dc_deps_.mailbox_manager.get();
+    share_group = dr_dc_deps_.shared_context_state->share_group();
+    offscreen_surface = dr_dc_deps_.shared_context_state->surface();
+    shared_context_state = dr_dc_deps_.shared_context_state;
+    program_cache = dr_dc_deps_.program_cache.get();
+  } else {
+    mailbox_manager = gpu_service_->mailbox_manager();
+    share_group = gpu_service_->share_group();
+    offscreen_surface =
+        gpu_service_->gpu_channel_manager()->default_offscreen_surface();
+    program_cache = gpu_service_->gpu_channel_manager()->program_cache();
+    shared_context_state = gpu_service_->GetContextState();
+  }
 
   gl::GLSurfaceFormat format;
   // If we are running a SW Viz process, we may not have a default offscreen
   // surface.
-  if (auto* offscreen_surface =
-          gpu_service_->gpu_channel_manager()->default_offscreen_surface()) {
+  if (offscreen_surface) {
     format = offscreen_surface->GetFormat();
   } else {
     DCHECK_EQ(gl::GetGLImplementation(), gl::kGLImplementationDisabled);
   }
-
-  const char kEnableDrDC[] = "enable-dr-dc";
-  const bool enable_dr_dc =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableDrDC);
-
   // When the host loses its connection to the viz process, it assumes the
   // process has crashed and tries to reinitialize it. However, it is possible
   // to have lost the connection for other reasons (e.g. deserialization
@@ -259,13 +395,12 @@ void VizMainImpl::CreateFrameSinkManagerInternal(
   // the same signature. https://crbug.com/928845
   CHECK(!task_executor_);
   task_executor_ = std::make_unique<gpu::GpuInProcessThreadService>(
-      viz_compositor_thread_runner_, gpu_service_->scheduler(),
-      gpu_service_->sync_point_manager(), gpu_service_->mailbox_manager(),
-      gpu_service_->share_group(), format, gpu_service_->gpu_feature_info(),
+      task_runner, gpu_service_->scheduler(),
+      gpu_service_->sync_point_manager(), mailbox_manager, share_group, format,
+      gpu_service_->gpu_feature_info(),
       gpu_service_->gpu_channel_manager()->gpu_preferences(),
-      gpu_service_->shared_image_manager(),
-      gpu_service_->gpu_channel_manager()->program_cache(),
-      gpu_service_->GetContextState());
+      gpu_service_->shared_image_manager(), program_cache,
+      shared_context_state);
 
   viz_compositor_thread_runner_->CreateFrameSinkManager(
       std::move(params), task_executor_.get(), gpu_service_.get());
@@ -289,6 +424,8 @@ void VizMainImpl::ExitProcess() {
     // thread TaskRunner after cleanup on compositor thread is finished.
     viz_compositor_thread_runner_->CleanupForShutdown(base::BindOnce(
         &Delegate::QuitMainMessageLoop, base::Unretained(delegate_)));
+    if (dr_dc_deps_.enabled)
+      dr_dc_deps_.thread->Stop();
   } else {
     delegate_->QuitMainMessageLoop();
   }

@@ -16,6 +16,10 @@
 #include "gpu/ipc/gl_in_process_context_export.h"
 #include "gpu/ipc/single_task_sequence.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace viz {
 class Display;
 class OutputSurfaceProviderImpl;
@@ -52,9 +56,9 @@ class GL_IN_PROCESS_CONTEXT_EXPORT SchedulerSequence
   // allow ScheduleTask.
   static void DefaultDisallowScheduleTaskOnCurrentThread();
 
-  explicit SchedulerSequence(Scheduler* scheduler);
-  SchedulerSequence(Scheduler* scheduler,
-                    scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  SchedulerSequence(
+      Scheduler* scheduler,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner = nullptr);
 
   // Note: this drops tasks not executed yet.
   ~SchedulerSequence() override;

@@ -291,6 +291,10 @@ class GPU_EXPORT SyncPointManager {
             uint32_t wait_order_num,
             base::OnceClosure callback);
 
+  bool WaitSync(const std::vector<SyncToken>& sync_tokens,
+                SequenceId sequence_id,
+                uint32_t wait_order_num);
+
   // Like Wait but runs the callback on the given task runner's thread.
   bool WaitNonThreadSafe(
       const SyncToken& sync_token,
