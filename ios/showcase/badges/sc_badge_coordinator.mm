@@ -1,0 +1,131 @@
+// Copyright 2019 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#import "ios/showcase/badges/sc_badge_coordinator.h"
+
+#include "ios/chrome/browser/infobars/infobar_badge_model.h"
+#import "ios/chrome/browser/ui/badges/badge_button_factory.h"
+#import "ios/chrome/browser/ui/badges/badge_consumer.h"
+#import "ios/chrome/browser/ui/badges/badge_delegate.h"
+#import "ios/chrome/browser/ui/badges/badge_popup_menu_coordinator.h"
+#import "ios/chrome/browser/ui/badges/badge_static_item.h"
+#import "ios/chrome/browser/ui/badges/badge_tappable_item.h"
+#import "ios/chrome/browser/ui/badges/badge_view_controller.h"
+#import "ios/chrome/browser/ui/util/named_guide.h"
+#import "ios/chrome/browser/ui/util/named_guide_util.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
+NSString* const kSCDisplayedBadgeToggleButton =
+    @"kSCDisplayedBadgeToggleButtonAXID";
+
+@interface BadgeContainerViewController : UIViewController
+@property(nonatomic, strong) BadgeViewController* centeredChildViewController;
+@property(nonatomic, weak) id<BadgeConsumer> consumer;
+@end
+
+@implementation BadgeContainerViewController
+- (void)viewDidLoad {
+  [super viewDidLoad];
+
+  UIStackView* stackView = [[UIStackView alloc] init];
+  stackView.translatesAutoresizingMaskIntoConstraints = NO;
+  stackView.axis = UILayoutConstraintAxisHorizontal;
+  [self.view addSubview:stackView];
+  [NSLayoutConstraint activateConstraints:@[
+    [stackView.widthAnchor constraintEqualToConstant:400],
+    [stackView.heightAnchor constraintEqualToConstant:100]
+  ]];
+  AddSameCenterConstraints(stackView, self.view);
+
+  [self addChildViewController:self.centeredChildViewController];
+  [stackView addArrangedSubview:self.centeredChildViewController.view];
+  [self didMoveToParentViewController:self.centeredChildViewController];
+  self.centeredChildViewController.view
+      .translatesAutoresizingMaskIntoConstraints = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [self.centeredChildViewController.view.widthAnchor
+        constraintGreaterThanOrEqualToConstant:1],
+    [self.centeredChildViewController.view.heightAnchor
+        constraintEqualToConstant:100]
+  ]];
+
+  UIButton* button = [UIButton buttonWithType:UIButtonTypeSystem];
+  button.accessibilityIdentifier = kSCDisplayedBadgeToggleButton;
+  [button setTitle:@"Show Overflow badge" forState:UIControlStateNormal];
+  [button addTarget:self
+                action:@selector(addSecondBadge:)
+      forControlEvents:UIControlEventTouchUpInside];
+  [stackView addArrangedSubview:button];
+
+  UIView* containerView = self.view;
+  containerView.backgroundColor = [UIColor whiteColor];
+  self.title = @"Badges";
+  AddNamedGuidesToView(@[ kBadgeOverflowMenuGuide ], self.view);
+  BadgeStaticItem* incognitoItem = [[BadgeStaticItem alloc]
+      initWithBadgeType:BadgeType::kBadgeTypeIncognito];
+  InfobarBadgeModel* passwordBadgeItem = [[InfobarBadgeModel alloc]
+      initWithInfobarType:InfobarType::kInfobarTypePasswordSave];
+  [self.consumer setupWithDisplayedBadge:passwordBadgeItem
+                         fullScreenBadge:incognitoItem];
+}
+
+- (void)addSecondBadge:(id)sender {
+  BadgeStaticItem* incognitoItem = [[BadgeStaticItem alloc]
+      initWithBadgeType:BadgeType::kBadgeTypeIncognito];
+  BadgeTappableItem* displayedBadge = [[BadgeTappableItem alloc]
+      initWithBadgeType:BadgeType::kBadgeTypeOverflow];
+  [self.consumer setupWithDisplayedBadge:displayedBadge
+                         fullScreenBadge:incognitoItem];
+  [self.consumer markDisplayedBadgeAsRead:NO];
+}
+
+@end
+
+@interface SCBadgeCoordinator () <BadgeDelegate>
+@property(nonatomic, strong)
+    BadgeContainerViewController* containerViewController;
+@property(nonatomic, strong) BadgeViewController* badgeViewController;
+@property(nonatomic, weak) id<BadgeConsumer> consumer;
+@property(nonatomic, strong)
+    BadgePopupMenuCoordinator* badgePopupMenuCoordinator;
+@end
+
+@implementation SCBadgeCoordinator
+@synthesize baseViewController = _baseViewController;
+
+- (void)start {
+  self.containerViewController = [[BadgeContainerViewController alloc] init];
+  BadgeButtonFactory* buttonFactory = [[BadgeButtonFactory alloc] init];
+  buttonFactory.delegate = self;
+  self.badgeViewController =
+      [[BadgeViewController alloc] initWithButtonFactory:buttonFactory];
+  self.consumer = self.badgeViewController;
+  self.containerViewController.consumer = self.badgeViewController;
+  self.containerViewController.centeredChildViewController =
+      self.badgeViewController;
+  [self.baseViewController pushViewController:self.containerViewController
+                                     animated:YES];
+}
+
+- (void)passwordsBadgeButtonTapped:(id)sender {
+}
+
+- (void)saveCardBadgeButtonTapped:(id)sender {
+}
+
+- (void)overflowBadgeButtonTapped:(id)sender {
+  self.badgePopupMenuCoordinator = [[BadgePopupMenuCoordinator alloc]
+      initWithBaseViewController:self.containerViewController];
+  NSArray* badgeItems = @[ [[InfobarBadgeModel alloc]
+      initWithInfobarType:InfobarType::kInfobarTypePasswordSave] ];
+  [self.badgePopupMenuCoordinator setBadgeItemsToShow:badgeItems];
+  [self.badgePopupMenuCoordinator start];
+  [self.consumer markDisplayedBadgeAsRead:YES];
+}
+
+@end
