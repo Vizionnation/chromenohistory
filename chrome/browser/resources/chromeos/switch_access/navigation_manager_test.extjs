@@ -1,0 +1,66 @@
+// Copyright 2018 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+GEN_INCLUDE(['switch_access_e2e_test_base.js']);
+
+/**
+ * @constructor
+ * @extends {SwitchAccessE2ETest}
+ */
+function SwitchAccessNavigationManagerTest() {
+  SwitchAccessE2ETest.call(this);
+}
+
+SwitchAccessNavigationManagerTest.prototype = {
+  __proto__: SwitchAccessE2ETest.prototype
+}
+
+function moveToPageContents() {
+  const navigator = switchAccess.navigationManager_;
+  // Start from the desktop node.
+  navigator.group_ = RootNodeWrapper.buildDesktopTree(navigator.desktop_);
+  navigator.node_ = navigator.group_.firstChild;
+
+  // The first item should be the browser window.
+  navigator.selectCurrentNode();
+
+  // The third item in the browser window is the page contents.
+  // TODO(anastasi): find the browser window dynamically.
+  navigator.moveForward();
+  navigator.moveForward();
+  navigator.selectCurrentNode();
+}
+
+function currentNode() {
+  return switchAccess.navigationManager_.node_;
+}
+
+TEST_F('SwitchAccessNavigationManagerTest', 'SelectButton', function() {
+  const website =
+      `data:text/html;charset=utf-8,
+      <button id="test" aria-pressed="false">First Button</button>
+      <button>Second Button</button>
+      <script>
+        var state = false;
+        var button = document.getElementById("test");
+        button.onclick = () => {
+          state = !state;
+          button.setAttribute("aria-pressed", state);
+        };
+      </script>`;
+
+  this.runWithLoadedTree(website, function(desktop) {
+    moveToPageContents();
+
+    let node = currentNode().automationNode;
+    assertTrue(!!node);
+    assertEquals(node.name, "First Button");
+
+    node.addEventListener(
+      chrome.automation.EventType.CHECKED_STATE_CHANGED,
+      this.newCallback((event) => assertEquals(node.name, event.target.name)));
+
+    switchAccess.selectCurrentNode();
+  });
+});
