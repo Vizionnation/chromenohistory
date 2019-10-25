@@ -1,0 +1,9 @@
+[document web]
+++[paragraph]
+++++[text] name='My favorite browser is '
+++++[content deletion]
+++++++[text] name='ABC'
+++++[text] name=' '
+++++[content insertion]
+++++++[text] name='Chrome'
+++++[text] name='!'
